@@ -33,15 +33,7 @@ menu = st.sidebar.radio("Navegación", [
     "Ayuda y guía de uso"
 ])
 
-
 DOTACION_PATH = "dotacion_fija.xlsx"
-ADQ_DIR = "historial_adquisicion"
-ANALISIS_DIR = "historial"
-
-# Crear carpetas necesarias si no existen
-os.makedirs(ADQ_DIR, exist_ok=True)
-os.makedirs(ANALISIS_DIR, exist_ok=True)
-
 ADQ_DIR = "historial_adquisicion"
 ANALISIS_DIR = "historial"
 
@@ -74,7 +66,7 @@ if menu == "Adquisición por escáner":
     if sku_input:
         sku = sku_input.strip().upper()
         st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
-        st.experimental_set_query_params()  # Forzar limpieza visual
+        st.query_params.clear()  # Reemplazo oficial de experimental_set_query_params  # Forzar limpieza visual
         st.experimental_rerun()
 
     if st.session_state.get("conteo"):
