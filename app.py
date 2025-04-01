@@ -70,15 +70,15 @@ else:
 
 
     
-if sku_input and sku_input != st.session_state.get("last_scanned", ""):
-    sku = sku_input.strip().upper()
-    st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
-    st.session_state.last_scanned = sku
-    st.session_state["clear_input"] = True
+    if sku_input and sku_input != st.session_state.get("last_scanned", ""):
+        sku = sku_input.strip().upper()
+        st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
+        st.session_state.last_scanned = sku
+        st.session_state["clear_input"] = True
 
         sku = sku_input.strip().upper()
         st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
-        st.experimental_set_query_params()  # Forzar limpieza visual
+        # removido  # Forzar limpieza visual
         # eliminado experimental_rerun
 
     if st.session_state.get("conteo"):
