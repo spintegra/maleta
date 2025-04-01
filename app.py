@@ -64,13 +64,20 @@ elif menu == "Adquisición por escáner":
     st.info("Escanea los códigos uno por uno. El sistema suma automáticamente las cantidades.")
 
     sku_input = st.text_input("Campo de escaneo activo (coloca el cursor aquí)", "")
+    if "input_cleared" in st.session_state and st.session_state["input_cleared"]:
+        st.session_state["input_cleared"] = False
+        st.experimental_set_query_params()  # Resetea input indirectamente
+        st.stop()
+
     if "conteo" not in st.session_state:
         st.session_state.conteo = {}
 
     if sku_input:
         sku = sku_input.strip().upper()
         st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
-        st.experimental_rerun()
+        # Eliminado st.experimental_rerun() para evitar errores
+        st.session_state["last_scanned"] = sku_input
+        st.session_state["input_cleared"] = True
 
     if st.session_state.conteo:
         conteo_df = pd.DataFrame(list(st.session_state.conteo.items()), columns=["SKU", "Contadas"])
