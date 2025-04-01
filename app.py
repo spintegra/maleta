@@ -30,7 +30,10 @@ menu = st.sidebar.radio("Navegación", [
     "Historial de análisis",
     "Ayuda y guía de uso"
 ])
-    "Inicio",
+    "Análisis de maleta",
+    "Historial de análisis",
+    "Ayuda y guía de uso"
+])
     "Adquisición por escáner",
     "Historial de adquisiciones",
     "Análisis de maleta",
