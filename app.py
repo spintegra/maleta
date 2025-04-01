@@ -29,11 +29,6 @@ menu = st.sidebar.radio("Navegación", [
     "Análisis de maleta",
     "Historial de análisis",
     "Ayuda y guía de uso"
-])
-])
-    "Adquisición por escáner",
-    "Historial de adquisiciones",
-])
 
 DOTACION_PATH = "dotacion_fija.xlsx"
 ADQ_DIR = "historial_adquisicion"
