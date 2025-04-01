@@ -1,6 +1,21 @@
 
 import streamlit as st
 import pandas as pd
+from io import BytesIO
+import os
+from datetime import date
+
+# Ruta interna para guardar análisis previos
+HISTORIAL_DIR = "historial"
+
+# Crear carpeta si no existe
+if not os.path.exists(HISTORIAL_DIR):
+    os.makedirs(HISTORIAL_DIR)
+
+# Cargar archivo de dotación fijo
+@st.cache_data
+def cargar_dotacion():
+    return pd.read_excel("dotacion_fija.xlsx")
 
 def cargar_archivo(nombre):
     archivo = st.file_uploader(f"Sube el archivo de {nombre}", type=["xlsx", "csv"])
@@ -77,18 +92,51 @@ def procesar(dotacion, conteo, consumo):
     return df[['SKU', 'DOTACIÓN', 'Contada', 'Usada', 'Diferencia', 'Diagnóstico', 'Origen de la diferencia']]
 
 # Interfaz principal
-st.title("Analizador de Maletas Técnicas")
+st.title("🔧 Analizador de Maletas Técnicas")
 
-dotacion_df = cargar_archivo("dotación base")
-conteo_df = cargar_archivo("conteo físico")
-consumo_df = cargar_archivo("consumo registrado")
+menu = st.sidebar.radio("Menú", ["📊 Nuevo análisis", "📂 Historial"])
 
-if dotacion_df is not None and conteo_df is not None and consumo_df is not None:
-    dotacion, conteo, consumo = limpiar_datos(dotacion_df, conteo_df, consumo_df)
-    resultado = procesar(dotacion, conteo, consumo)
+if menu == "📊 Nuevo análisis":
+    st.subheader("📋 Información del análisis")
 
-    st.success("Análisis completado ✅")
-    st.dataframe(resultado)
+    tecnico = st.selectbox("Técnico responsable", ["Francisco Javier", "Rigoberto"])
+    fecha_inicio = st.date_input("Desde:", value=date.today())
+    fecha_fin = st.date_input("Hasta:", value=date.today())
 
-    csv = resultado.to_csv(index=False).encode('utf-8')
-    st.download_button("Descargar resultado en CSV", csv, "resultado_maleta.csv", "text/csv")
+    st.divider()
+
+    dotacion_df = cargar_dotacion()
+    conteo_df = cargar_archivo("conteo físico")
+    consumo_df = cargar_archivo("consumo registrado")
+
+    if conteo_df is not None and consumo_df is not None:
+        dotacion, conteo, consumo = limpiar_datos(dotacion_df, conteo_df, consumo_df)
+        resultado = procesar(dotacion, conteo, consumo)
+
+        st.success("✅ Análisis completado")
+        st.dataframe(resultado)
+
+        nombre_archivo = f"{tecnico.lower().replace(' ', '_')}_{fecha_inicio}_a_{fecha_fin}.xlsx"
+        path_archivo = os.path.join(HISTORIAL_DIR, nombre_archivo)
+
+        with pd.ExcelWriter(path_archivo, engine='openpyxl') as writer:
+            resultado.to_excel(writer, index=False, sheet_name="Análisis")
+
+        with BytesIO() as output:
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                resultado.to_excel(writer, index=False, sheet_name="Análisis")
+            st.download_button("📥 Descargar resultado en Excel", output.getvalue(), file_name=nombre_archivo)
+
+elif menu == "📂 Historial":
+    st.subheader("📁 Historial de análisis previos")
+
+    archivos = sorted(os.listdir(HISTORIAL_DIR))
+    seleccion = st.selectbox("Selecciona un archivo:", archivos)
+
+    if seleccion:
+        df_hist = pd.read_excel(os.path.join(HISTORIAL_DIR, seleccion))
+        st.write(f"Vista previa de: **{seleccion}**")
+        st.dataframe(df_hist)
+
+        with open(os.path.join(HISTORIAL_DIR, seleccion), "rb") as f:
+            st.download_button("📥 Descargar este análisis", f, file_name=seleccion)
