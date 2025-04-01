@@ -4,139 +4,207 @@ import pandas as pd
 from io import BytesIO
 import os
 from datetime import date
+from PIL import Image
 
-# Ruta interna para guardar análisis previos
-HISTORIAL_DIR = "historial"
+# Configuración de la página
+st.set_page_config(page_title="SPINTEGRA - Gestión de Maletas Técnicas", layout="wide")
 
-# Crear carpeta si no existe
-if not os.path.exists(HISTORIAL_DIR):
-    os.makedirs(HISTORIAL_DIR)
+# Colores personalizados
+COLOR_OK = "#28a745"
+COLOR_FALTANTE = "#ffc107"
+COLOR_EXCESO = "#dc3545"
+COLOR_TEXTO = "#014F96"
+COLOR_FONDO = "#FFFFFF"
 
-# Cargar archivo de dotación fijo
+# Logo y encabezado
+col1, col2 = st.columns([0.2, 0.8])
+with col1:
+    st.image("logo_spintegra.png", width=180)
+with col2:
+    st.markdown(f"<h1 style='color:{COLOR_TEXTO};'>SPINTEGRA – Gestión de Maletas Técnicas</h1>", unsafe_allow_html=True)
+    st.write("Control inteligente de inventario y consumo técnico")
+
+# Menú lateral
+menu = st.sidebar.radio("Navegación", [
+    "Inicio",
+    "Adquisición por escáner",
+    "Historial de adquisiciones",
+    "Análisis de maleta",
+    "Historial de análisis",
+    "Ayuda y guía de uso"
+])
+
+DOTACION_PATH = "dotacion_fija.xlsx"
+ADQ_DIR = "historial_adquisicion"
+ANALISIS_DIR = "historial"
+
 @st.cache_data
 def cargar_dotacion():
-    return pd.read_excel("dotacion_fija.xlsx")
+    return pd.read_excel(DOTACION_PATH)
 
-def cargar_archivo(nombre):
-    archivo = st.file_uploader(f"Sube el archivo de {nombre}", type=["xlsx", "csv"])
-    if archivo:
-        if archivo.name.endswith(".csv"):
-            return pd.read_csv(archivo)
-        else:
-            return pd.read_excel(archivo)
-    return None
+def generar_resumen(df):
+    ok = df[df["Estado"] == "OK"].shape[0]
+    faltantes = df[df["Estado"] == "Faltante"].shape[0]
+    excesos = df[df["Estado"] == "Exceso"].shape[0]
+    total = df["Contadas"].sum()
+    return ok, faltantes, excesos, total
 
-def limpiar_datos(dotacion_df, conteo_df, consumo_df):
-    dotacion = dotacion_df[['SKU', 'DOTACIÓN']].dropna()
-    dotacion['SKU'] = dotacion['SKU'].str.strip()
+if menu == "Inicio":
+    st.subheader("Bienvenido")
+    st.write("Utiliza el menú lateral para acceder a las funcionalidades.")
+    st.success("¿Nuevo por aquí? Revisa la sección 'Ayuda y guía de uso' para empezar.")
 
-    conteo = conteo_df.iloc[2:, [1, 3]].copy()
-    conteo.columns = ['SKU', 'Cantidad']
-    conteo['Cantidad'] = pd.to_numeric(conteo['Cantidad'], errors='coerce')
-    conteo = conteo.dropna(subset=['SKU'])
-    conteo['SKU'] = conteo['SKU'].str.strip()
+elif menu == "Adquisición por escáner":
+    st.subheader("Adquisición de inventario con escáner")
 
-    consumo = consumo_df[['ID Parte', 'Cantidad', 'Articulo']].dropna()
-    consumo['SKU'] = consumo['Articulo'].str.extract(r'(^\S+)', expand=False)
-    consumo = consumo[['SKU', 'Cantidad', 'ID Parte']]
-    consumo['SKU'] = consumo['SKU'].str.strip()
+    tecnico = st.selectbox("Selecciona el técnico responsable", ["Francisco Javier", "Rigoberto"])
+    fecha = st.date_input("Fecha del inventario", value=date.today())
+    dotacion = cargar_dotacion()
 
-    return dotacion, conteo, consumo
+    st.info("Escanea los códigos uno por uno. El sistema suma automáticamente las cantidades.")
 
-def procesar(dotacion, conteo, consumo):
-    conteo_agg = conteo.groupby('SKU', as_index=False).sum()
-    conteo_agg.rename(columns={'Cantidad': 'Contada'}, inplace=True)
+    sku_input = st.text_input("Campo de escaneo activo (coloca el cursor aquí)", "")
+    if "conteo" not in st.session_state:
+        st.session_state.conteo = {}
 
-    consumo_agg = consumo.groupby('SKU', as_index=False).agg({'Cantidad': 'sum'})
-    consumo_agg.rename(columns={'Cantidad': 'Usada'}, inplace=True)
+    if sku_input:
+        sku = sku_input.strip().upper()
+        st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
+        st.experimental_rerun()
 
-    df = pd.merge(dotacion, conteo_agg, on='SKU', how='outer')
-    df = pd.merge(df, consumo_agg, on='SKU', how='outer')
-    df[['DOTACIÓN', 'Contada', 'Usada']] = df[['DOTACIÓN', 'Contada', 'Usada']].fillna(0)
-    df['Diferencia'] = df['DOTACIÓN'] - (df['Contada'] + df['Usada'])
+    if st.session_state.conteo:
+        conteo_df = pd.DataFrame(list(st.session_state.conteo.items()), columns=["SKU", "Contadas"])
+        df = pd.merge(conteo_df, dotacion[["SKU", "DOTACIÓN"]], on="SKU", how="left").fillna(0)
+        df["DOTACIÓN"] = df["DOTACIÓN"].astype(int)
+        df["Diferencia"] = df["Contadas"] - df["DOTACIÓN"]
 
-    consumo_ids = consumo.groupby('SKU')['ID Parte'].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
-    consumo_ids.rename(columns={'ID Parte': 'Origen de la diferencia'}, inplace=True)
-    df = pd.merge(df, consumo_ids, on='SKU', how='left')
+        def clasificar(row):
+            if row["Contadas"] == row["DOTACIÓN"]:
+                return "OK"
+            elif row["Contadas"] < row["DOTACIÓN"]:
+                return "Faltante"
+            else:
+                return "Exceso"
 
-    def diagnostico(row):
-        dot, cont, usada, dif = row['DOTACIÓN'], row['Contada'], row['Usada'], row['Diferencia']
-        origen = row['Origen de la diferencia']
-        if dif == 0:
-            return "OK"
-        if cont > dot:
-            return "Exceso en maleta"
-        if cont + usada < dot:
-            if usada == 0 and pd.isna(origen):
-                return "Error de conteo"
-            if usada > 0 and pd.isna(origen):
-                return "Consumo no registrado"
-            if usada > 0 and not pd.isna(origen):
-                return "Consumo no repuesto"
-        if cont < dot and usada == 0 and pd.isna(origen):
-            return "Error de conteo"
-        return "Revisión necesaria"
+        df["Estado"] = df.apply(clasificar, axis=1)
 
-    def origen_diferencia(row):
-        if not pd.isna(row['Origen de la diferencia']):
-            return row['Origen de la diferencia']
-        elif row['Usada'] > 0:
-            return "No registrado"
-        elif row['Contada'] > 0:
-            return "Solo en conteo físico"
-        else:
-            return "Sin datos"
+        st.markdown("### Resumen del inventario")
+        ok, faltantes, excesos, total = generar_resumen(df)
+        st.success(f"✔️ OK: {ok} | 🟠 Faltantes: {faltantes} | 🔴 Excesos: {excesos} | Total unidades: {total}")
 
-    df['Diagnóstico'] = df.apply(diagnostico, axis=1)
-    df['Origen de la diferencia'] = df.apply(origen_diferencia, axis=1)
-    return df[['SKU', 'DOTACIÓN', 'Contada', 'Usada', 'Diferencia', 'Diagnóstico', 'Origen de la diferencia']]
+        st.markdown("### Revisión del conteo (editable)")
+        edit_df = st.data_editor(df[["SKU", "Contadas", "DOTACIÓN", "Diferencia", "Estado"]],
+                                 use_container_width=True, num_rows="dynamic")
 
-# Interfaz principal
-st.title("🔧 Analizador de Maletas Técnicas")
+        if st.button("Finalizar adquisición y guardar"):
+            export = edit_df[["SKU", "Contadas"]].rename(columns={"Contadas": "Cantidad"})
+            filename = f"adquisicion_{tecnico.lower().replace(' ', '_')}_{fecha}.xlsx"
+            path = os.path.join(ADQ_DIR, filename)
+            export.to_excel(path, index=False)
 
-menu = st.sidebar.radio("Menú", ["📊 Nuevo análisis", "📂 Historial"])
+            st.success(f"Inventario guardado como {filename}")
+            st.download_button("Descargar archivo", data=export.to_excel(index=False, engine='openpyxl'),
+                               file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-if menu == "📊 Nuevo análisis":
-    st.subheader("📋 Información del análisis")
+elif menu == "Historial de adquisiciones":
+    st.subheader("Historial de adquisiciones")
+    archivos = sorted(os.listdir(ADQ_DIR))
+    seleccion = st.selectbox("Selecciona un archivo:", archivos)
+    if seleccion:
+        df_hist = pd.read_excel(os.path.join(ADQ_DIR, seleccion))
+        st.write(f"Vista previa de: **{seleccion}**")
+        st.dataframe(df_hist, use_container_width=True)
+        with open(os.path.join(ADQ_DIR, seleccion), "rb") as f:
+            st.download_button("Descargar este archivo", f, file_name=seleccion)
+
+elif menu == "Análisis de maleta":
+    st.subheader("Análisis de maleta técnica")
 
     tecnico = st.selectbox("Técnico responsable", ["Francisco Javier", "Rigoberto"])
     fecha_inicio = st.date_input("Desde:", value=date.today())
     fecha_fin = st.date_input("Hasta:", value=date.today())
+    conteo_file = st.file_uploader("Sube el archivo de conteo físico", type=["xlsx"])
+    consumo_file = st.file_uploader("Sube el archivo de consumo registrado", type=["xlsx", "csv"])
 
-    st.divider()
+    if conteo_file and consumo_file:
+        dotacion = cargar_dotacion()
+        conteo = pd.read_excel(conteo_file)
+        conteo = conteo[["SKU", "Cantidad"]].groupby("SKU").sum().reset_index()
+        conteo.rename(columns={"Cantidad": "Contada"}, inplace=True)
 
-    dotacion_df = cargar_dotacion()
-    conteo_df = cargar_archivo("conteo físico")
-    consumo_df = cargar_archivo("consumo registrado")
+        consumo = pd.read_excel(consumo_file) if consumo_file.name.endswith("xlsx") else pd.read_csv(consumo_file)
+        consumo["SKU"] = consumo["Articulo"].str.extract(r'(^\S+)', expand=False).str.strip()
+        consumo_agg = consumo.groupby("SKU")["Cantidad"].sum().reset_index()
+        consumo_agg.rename(columns={"Cantidad": "Usada"}, inplace=True)
 
-    if conteo_df is not None and consumo_df is not None:
-        dotacion, conteo, consumo = limpiar_datos(dotacion_df, conteo_df, consumo_df)
-        resultado = procesar(dotacion, conteo, consumo)
+        consumo_ids = consumo.groupby("SKU")["ID Parte"].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
+        consumo_ids.rename(columns={"ID Parte": "Origen de la diferencia"}, inplace=True)
 
-        st.success("✅ Análisis completado")
-        st.dataframe(resultado)
+        df = pd.merge(dotacion, conteo, on="SKU", how="outer")
+        df = pd.merge(df, consumo_agg, on="SKU", how="outer")
+        df = pd.merge(df, consumo_ids, on="SKU", how="left")
+        df.fillna(0, inplace=True)
+        df["Diferencia"] = df["DOTACIÓN"] - (df["Contada"] + df["Usada"])
 
-        nombre_archivo = f"{tecnico.lower().replace(' ', '_')}_{fecha_inicio}_a_{fecha_fin}.xlsx"
-        path_archivo = os.path.join(HISTORIAL_DIR, nombre_archivo)
+        def diagnostico(row):
+            if row["Diferencia"] == 0:
+                return "OK"
+            if row["Contada"] > row["DOTACIÓN"]:
+                return "Exceso en maleta"
+            if row["Contada"] + row["Usada"] < row["DOTACIÓN"]:
+                if row["Usada"] == 0:
+                    return "Error de conteo"
+                elif row["Usada"] > 0 and row["Origen de la diferencia"] == 0:
+                    return "Consumo no registrado"
+                else:
+                    return "Consumo no repuesto"
+            return "Revisión necesaria"
 
-        with pd.ExcelWriter(path_archivo, engine='openpyxl') as writer:
-            resultado.to_excel(writer, index=False, sheet_name="Análisis")
+        df["Diagnóstico"] = df.apply(diagnostico, axis=1)
+        df["Origen de la diferencia"] = df["Origen de la diferencia"].replace(0, "No registrado")
 
-        with BytesIO() as output:
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                resultado.to_excel(writer, index=False, sheet_name="Análisis")
-            st.download_button("📥 Descargar resultado en Excel", output.getvalue(), file_name=nombre_archivo)
+        resumen = df[df["Diferencia"] != 0]
+        st.success(f"Total diferencias: {len(resumen)} | Unidades afectadas: {int(resumen['Diferencia'].abs().sum())}")
 
-elif menu == "📂 Historial":
-    st.subheader("📁 Historial de análisis previos")
+        st.dataframe(df[["SKU", "DOTACIÓN", "Contada", "Usada", "Diferencia", "Diagnóstico", "Origen de la diferencia"]],
+                     use_container_width=True)
 
-    archivos = sorted(os.listdir(HISTORIAL_DIR))
-    seleccion = st.selectbox("Selecciona un archivo:", archivos)
+        filename = f"analisis_{tecnico.lower().replace(' ', '_')}_{fecha_inicio}_a_{fecha_fin}.xlsx"
+        df_export = df[["SKU", "DOTACIÓN", "Contada", "Usada", "Diferencia", "Diagnóstico", "Origen de la diferencia"]]
+        df_export.to_excel(os.path.join(ANALISIS_DIR, filename), index=False)
 
+        st.download_button("Descargar resultado en Excel", data=df_export.to_excel(index=False, engine='openpyxl'),
+                           file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+elif menu == "Historial de análisis":
+    st.subheader("Historial de análisis de maletas")
+    archivos = sorted(os.listdir(ANALISIS_DIR))
+    seleccion = st.selectbox("Selecciona un análisis:", archivos)
     if seleccion:
-        df_hist = pd.read_excel(os.path.join(HISTORIAL_DIR, seleccion))
+        df_hist = pd.read_excel(os.path.join(ANALISIS_DIR, seleccion))
         st.write(f"Vista previa de: **{seleccion}**")
-        st.dataframe(df_hist)
+        st.dataframe(df_hist, use_container_width=True)
+        with open(os.path.join(ANALISIS_DIR, seleccion), "rb") as f:
+            st.download_button("Descargar este análisis", f, file_name=seleccion)
 
-        with open(os.path.join(HISTORIAL_DIR, seleccion), "rb") as f:
-            st.download_button("📥 Descargar este análisis", f, file_name=seleccion)
+elif menu == "Ayuda y guía de uso":
+    st.subheader("Guía de uso de la aplicación")
+    st.markdown("""
+**¿Cómo funciona la adquisición por escáner?**  
+Escanea los códigos de producto con tu lector. Cada lectura incrementa 1 unidad en la tabla. Puedes corregir manualmente antes de finalizar.
+
+**¿Qué significan los colores?**  
+- 🟢 Verde: cantidad correcta  
+- 🟠 Naranja: faltan unidades  
+- 🔴 Rojo: hay más de la dotación
+
+**¿Cómo se hace el análisis de maleta?**  
+Sube el conteo físico y el consumo. El sistema calculará diferencias y te dirá qué reponer o revisar.
+
+**¿Qué archivos puedo usar?**  
+- Excel (.xlsx) o CSV  
+- Columnas requeridas: SKU y Cantidad para conteo, SKU y Cantidad y Articulo para consumo
+
+**¿Dónde se guardan los análisis?**  
+En la sección de historial, puedes ver todos los análisis anteriores y descargarlos.
+""")
