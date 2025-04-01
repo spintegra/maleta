@@ -61,13 +61,25 @@ if menu == "Adquisición por escáner":
     if "conteo" not in st.session_state:
         st.session_state.conteo = {}
 
+    
+if "clear_input" in st.session_state and st.session_state["clear_input"]:
+    st.session_state["clear_input"] = False
+    sku_input = st.text_input("Escanea aquí el código", value="", key="sku_input", label_visibility="visible")
+else:
     sku_input = st.text_input("Escanea aquí el código", key="sku_input", label_visibility="visible")
 
-    if sku_input:
+
+    
+if sku_input and sku_input != st.session_state.get("last_scanned", ""):
+    sku = sku_input.strip().upper()
+    st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
+    st.session_state.last_scanned = sku
+    st.session_state["clear_input"] = True
+
         sku = sku_input.strip().upper()
         st.session_state.conteo[sku] = st.session_state.conteo.get(sku, 0) + 1
-        st.query_params.clear()  # Reemplazo oficial de experimental_set_query_params  # Forzar limpieza visual
-        st.experimental_rerun()
+        st.experimental_set_query_params()  # Forzar limpieza visual
+        # eliminado experimental_rerun
 
     if st.session_state.get("conteo"):
         conteo_df = pd.DataFrame(list(st.session_state.conteo.items()), columns=["SKU", "Contadas"])
@@ -104,7 +116,7 @@ if menu == "Adquisición por escáner":
             with col6:
                 if st.button("🗑️", key=f"delete_{sku}"):
                     del st.session_state.conteo[sku]
-                    st.experimental_rerun()
+                    # eliminado experimental_rerun
         st.markdown("Puedes editar la cantidad directamente en la tabla si lo prefieres.")
         edit_df = st.data_editor(df[["SKU", "Contadas", "DOTACIÓN", "Diferencia", "Estado"]],
     
