@@ -30,15 +30,9 @@ menu = st.sidebar.radio("Navegación", [
     "Historial de análisis",
     "Ayuda y guía de uso"
 ])
-    "Análisis de maleta",
-    "Historial de análisis",
-    "Ayuda y guía de uso"
 ])
     "Adquisición por escáner",
     "Historial de adquisiciones",
-    "Análisis de maleta",
-    "Historial de análisis",
-    "Ayuda y guía de uso"
 ])
 
 DOTACION_PATH = "dotacion_fija.xlsx"
