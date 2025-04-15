@@ -76,6 +76,7 @@ def procesar(dotacion, conteo, consumo):
 
     df['Diagnóstico'] = df.apply(diagnostico, axis=1)
     df['Origen de la diferencia'] = df.apply(origen_diferencia, axis=1)
+    df['SKU'] = df['SKU'].astype(str).str.strip()
     df['Ubicación'] = df['SKU'].str.extract(r'^\d{3}-(\w{5})-\d{4}', expand=False)
     df.sort_values("Ubicación", inplace=True)
 
