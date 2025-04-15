@@ -5,14 +5,9 @@ from io import BytesIO
 import os
 from datetime import date
 
-# Ruta interna para guardar análisis previos
 HISTORIAL_DIR = "historial"
+os.makedirs(HISTORIAL_DIR, exist_ok=True)
 
-# Crear carpeta si no existe
-if not os.path.exists(HISTORIAL_DIR):
-    os.makedirs(HISTORIAL_DIR)
-
-# Cargar archivo de dotación fijo
 @st.cache_data
 def cargar_dotacion():
     return pd.read_excel("dotacion_fija.xlsx")
@@ -27,19 +22,19 @@ def cargar_archivo(nombre):
     return None
 
 def limpiar_datos(dotacion_df, conteo_df, consumo_df):
-    dotacion = dotacion_df[['SKU', 'DOTACIÓN']].dropna()
-    dotacion['SKU'] = dotacion['SKU'].str.strip()
+    dotacion = dotacion_df[['SKU', 'DOTACIÓN', 'CAJA', 'SECCION', 'Nº ORDEN']].dropna(subset=["SKU"])
+    dotacion['SKU'] = dotacion['SKU'].astype(str).str.strip()
 
     conteo = conteo_df.iloc[2:, [1, 3]].copy()
     conteo.columns = ['SKU', 'Cantidad']
     conteo['Cantidad'] = pd.to_numeric(conteo['Cantidad'], errors='coerce')
     conteo = conteo.dropna(subset=['SKU'])
-    conteo['SKU'] = conteo['SKU'].str.strip()
+    conteo['SKU'] = conteo['SKU'].astype(str).str.strip()
 
     consumo = consumo_df[['ID Parte', 'Cantidad', 'Articulo']].dropna()
     consumo['SKU'] = consumo['Articulo'].str.extract(r'(^\S+)', expand=False)
     consumo = consumo[['SKU', 'Cantidad', 'ID Parte']]
-    consumo['SKU'] = consumo['SKU'].str.strip()
+    consumo['SKU'] = consumo['SKU'].astype(str).str.strip()
 
     return dotacion, conteo, consumo
 
@@ -53,29 +48,21 @@ def procesar(dotacion, conteo, consumo):
     df = pd.merge(dotacion, conteo_agg, on='SKU', how='outer')
     df = pd.merge(df, consumo_agg, on='SKU', how='outer')
     df[['DOTACIÓN', 'Contada', 'Usada']] = df[['DOTACIÓN', 'Contada', 'Usada']].fillna(0)
-    df['Diferencia'] = df['DOTACIÓN'] - (df['Contada'] + df['Usada'])
+    df['Reposición'] = df['DOTACIÓN'] - df['Contada']
 
     consumo_ids = consumo.groupby('SKU')['ID Parte'].apply(lambda x: ', '.join(sorted(set(x)))).reset_index()
     consumo_ids.rename(columns={'ID Parte': 'Origen de la diferencia'}, inplace=True)
     df = pd.merge(df, consumo_ids, on='SKU', how='left')
 
     def diagnostico(row):
-        dot, cont, usada, dif = row['DOTACIÓN'], row['Contada'], row['Usada'], row['Diferencia']
-        origen = row['Origen de la diferencia']
-        if dif == 0:
+        if row['Reposición'] == row['Usada']:
             return "OK"
-        if cont > dot:
-            return "Exceso en maleta"
-        if cont + usada < dot:
-            if usada == 0 and pd.isna(origen):
-                return "Error de conteo"
-            if usada > 0 and pd.isna(origen):
-                return "Consumo no registrado"
-            if usada > 0 and not pd.isna(origen):
-                return "Consumo no repuesto"
-        if cont < dot and usada == 0 and pd.isna(origen):
-            return "Error de conteo"
-        return "Revisión necesaria"
+        elif row['Reposición'] > row['Usada']:
+            return "Faltan piezas sin justificar"
+        elif row['Reposición'] < row['Usada']:
+            return "Consumo desde almacén oficina"
+        else:
+            return "Revisión necesaria"
 
     def origen_diferencia(row):
         if not pd.isna(row['Origen de la diferencia']):
@@ -89,10 +76,10 @@ def procesar(dotacion, conteo, consumo):
 
     df['Diagnóstico'] = df.apply(diagnostico, axis=1)
     df['Origen de la diferencia'] = df.apply(origen_diferencia, axis=1)
-    return df[['SKU', 'DOTACIÓN', 'Contada', 'Usada', 'Diferencia', 'Diagnóstico', 'Origen de la diferencia']]
 
-# Interfaz principal
-st.title("🔧 Analizador de Maletas Técnicas")
+    return df[['SKU', 'CAJA', 'SECCION', 'Nº ORDEN', 'DOTACIÓN', 'Contada', 'Usada', 'Reposición', 'Diagnóstico', 'Origen de la diferencia']]
+
+st.title("🔧 Analizador de Maletas Técnicas - Reposición")
 
 menu = st.sidebar.radio("Menú", ["📊 Nuevo análisis", "📂 Historial"])
 
@@ -129,14 +116,11 @@ if menu == "📊 Nuevo análisis":
 
 elif menu == "📂 Historial":
     st.subheader("📁 Historial de análisis previos")
-
     archivos = sorted(os.listdir(HISTORIAL_DIR))
     seleccion = st.selectbox("Selecciona un archivo:", archivos)
-
     if seleccion:
         df_hist = pd.read_excel(os.path.join(HISTORIAL_DIR, seleccion))
         st.write(f"Vista previa de: **{seleccion}**")
         st.dataframe(df_hist)
-
         with open(os.path.join(HISTORIAL_DIR, seleccion), "rb") as f:
             st.download_button("📥 Descargar este análisis", f, file_name=seleccion)
