@@ -99,8 +99,13 @@ if menu == "📊 Nuevo análisis":
     if conteo_df is not None and consumo_df is not None:
         dotacion, conteo, consumo = limpiar_datos(dotacion_df, conteo_df, consumo_df)
         resultado = procesar(dotacion, conteo, consumo)
+        resultado["Ubicación"] = resultado["SKU"].str.extract(r'^(\d{3}-\w{5})-\d{4}', expand=False)
 
         st.success("✅ Análisis completado")
+
+    resultado["Ubicación"] = resultado["SKU"].str.extract(r'^(\d{3}-\w{5})-\d{4}', expand=False)
+    resultado.sort_values("Ubicación", inplace=True)
+
         st.dataframe(resultado)
 
         nombre_archivo = f"{tecnico.lower().replace(' ', '_')}_{fecha_inicio}_a_{fecha_fin}.xlsx"
