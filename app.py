@@ -76,21 +76,64 @@ def obtener_stock_warehouse(warehouse_id: str) -> Optional[Dict]:
             try:
                 data = response.json()
                 
-                # Validar que data sea una lista
-                if not isinstance(data, list):
-                    st.error(f"❌ Respuesta inesperada de Holded (no es lista): {type(data)}")
-                    return None
-                
-                # Procesar cada item validando estructura
+                # Procesar según el tipo de respuesta
                 stock_dict = {}
-                for item in data:
-                    if isinstance(item, dict) and 'sku' in item:
-                        sku = item.get('sku', '').upper().strip()
-                        stock = item.get('stock', 0)
-                        if sku:  # Solo agregar si el SKU no está vacío
-                            stock_dict[sku] = stock
+                
+                if isinstance(data, list):
+                    # Formato lista - procesar cada item
+                    for item in data:
+                        if isinstance(item, dict) and 'sku' in item:
+                            sku = item.get('sku', '').upper().strip()
+                            stock = item.get('stock', 0)
+                            if sku:  # Solo agregar si el SKU no está vacío
+                                stock_dict[sku] = stock
+                        else:
+                            st.warning(f"⚠️ Item con estructura inesperada: {item}")
+                
+                elif isinstance(data, dict):
+                    # Formato diccionario - puede tener diferentes estructuras
+                    if 'data' in data and isinstance(data['data'], list):
+                        # Caso: {"data": [items...], "meta": {...}}
+                        for item in data['data']:
+                            if isinstance(item, dict) and 'sku' in item:
+                                sku = item.get('sku', '').upper().strip()
+                                stock = item.get('stock', 0)
+                                if sku:
+                                    stock_dict[sku] = stock
+                    
+                    elif 'products' in data and isinstance(data['products'], list):
+                        # Caso: {"products": [items...]}
+                        for item in data['products']:
+                            if isinstance(item, dict) and 'sku' in item:
+                                sku = item.get('sku', '').upper().strip()
+                                stock = item.get('stock', 0)
+                                if sku:
+                                    stock_dict[sku] = stock
+                    
+                    elif 'items' in data and isinstance(data['items'], list):
+                        # Caso: {"items": [items...]}
+                        for item in data['items']:
+                            if isinstance(item, dict) and 'sku' in item:
+                                sku = item.get('sku', '').upper().strip()
+                                stock = item.get('stock', 0)
+                                if sku:
+                                    stock_dict[sku] = stock
+                    
                     else:
-                        st.warning(f"⚠️ Item con estructura inesperada en respuesta Holded: {item}")
+                        # Caso: diccionario plano con SKUs como claves
+                        for key, value in data.items():
+                            if isinstance(value, (int, float)) and key.upper().strip():
+                                stock_dict[key.upper().strip()] = value
+                            elif isinstance(value, dict) and 'stock' in value:
+                                sku = key.upper().strip()
+                                stock = value.get('stock', 0)
+                                if sku:
+                                    stock_dict[sku] = stock
+                
+                else:
+                    st.error(f"❌ Formato de respuesta no soportado de Holded: {type(data)}")
+                    st.code(f"Muestra de datos: {str(data)[:200]}...")
+                    return None
                 
                 st.success(f"✅ Stock obtenido del almacén: {len(stock_dict)} productos")
                 return stock_dict
@@ -422,14 +465,23 @@ def mostrar_interface_inventario():
     
     with col1:
         # Campo de entrada con callback automático
-        st.text_input(
-            "📱 Escanea o introduce el código SKU:",
-            key="input_scanner",
-            placeholder="Escanea con pistola o escribe código...",
-            help="💡 Con pistola: escanea y automáticamente se agrega. Manual: escribe y presiona Enter",
-            on_change=procesar_codigo_escaneado_rapido,
-            label_visibility="visible"
-        )
+        if st.session_state.get('escaneo_pausado', False):
+            st.warning("⏸️ ESCANEO PAUSADO - Reactiva para continuar")
+            st.text_input(
+                "📱 Escaneo PAUSADO:",
+                value="",
+                disabled=True,
+                help="El escaneo está pausado. Presiona 'Reanudar Escaneo' para continuar"
+            )
+        else:
+            st.text_input(
+                "📱 Escanea o introduce el código SKU:",
+                key="input_scanner",
+                placeholder="Escanea con pistola o escribe código...",
+                help="💡 Con pistola: escanea y automáticamente se agrega. Manual: escribe y presiona Enter",
+                on_change=procesar_codigo_escaneado_rapido,
+                label_visibility="visible"
+            )
         
         # Mostrar feedback del último escaneo
         if st.session_state.ultimo_feedback:
