@@ -126,7 +126,7 @@ def analizar_origen_consumo(sku: str, consumo: float, inventario_maleta: float,
         return ("⚠️ Stock insuficiente", disponible_maleta, stock_oficina_sku, 
                 f"Falta stock: {int(deficit)} uds")
 
-def generar_alertas_dotacion(df_analisis: pd.DataFrame, consumo_df: pd.DataFrame) -> List[Dict]:
+def generar_alertas_dotacion(df_analisis: pd.DataFrame, consumo_df: pd.DataFrame) -> list:
     """Genera alertas para SKUs candidatos a añadir a dotación fija."""
     
     alertas = []
@@ -775,7 +775,7 @@ def limpiar_datos(dotacion_df: pd.DataFrame, conteo_df: pd.DataFrame, consumo_df
             raise e
 
 def procesar_analisis(dotacion: pd.DataFrame, conteo: pd.DataFrame, consumo: pd.DataFrame, 
-                     stock_maleta: Dict = None, tecnico_seleccionado: str = None) -> Tuple[pd.DataFrame, List[Dict]]:
+                     stock_maleta: Dict = None, tecnico_seleccionado: str = None) -> Tuple[pd.DataFrame, list]:
     """Procesa el análisis principal con lógica completa incluyendo origen del consumo."""
     
     with st.spinner("⚙️ Procesando análisis avanzado..."):
@@ -941,7 +941,7 @@ def procesar_analisis(dotacion: pd.DataFrame, conteo: pd.DataFrame, consumo: pd.
             df_error = pd.DataFrame()
             return df_error, []
 
-def mostrar_metricas_resumen(df: pd.DataFrame, alertas: List[Dict] = None):
+def mostrar_metricas_resumen(df: pd.DataFrame, alertas: list = None):
     """Muestra métricas de resumen del análisis incluyendo origen del consumo."""
     
     if df.empty:
@@ -1079,7 +1079,7 @@ def generar_nombre_archivo(tecnico: str, fecha_inicio: date, fecha_fin: date) ->
     timestamp = datetime.now().strftime("%H%M")
     return f"{tecnico_clean}_{fecha_inicio}_a_{fecha_fin}_{timestamp}.xlsx"
 
-def exportar_a_excel(df: pd.DataFrame, nombre_archivo: str, tecnico: str, fecha_inicio: date, fecha_fin: date, alertas: List[Dict] = None) -> BytesIO:
+def exportar_a_excel(df: pd.DataFrame, nombre_archivo: str, tecnico: str, fecha_inicio: date, fecha_fin: date, alertas: list = None) -> BytesIO:
     """Exporta los resultados a Excel con formato mejorado incluyendo análisis de origen."""
     
     output = BytesIO()
