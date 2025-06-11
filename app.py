@@ -73,11 +73,37 @@ def obtener_stock_warehouse(warehouse_id: str) -> Optional[Dict]:
             response = requests.get(url, headers=headers, timeout=10)
             
         if response.status_code == 200:
-            data = response.json()
-            st.success(f"✅ Stock obtenido del almacén: {len(data)} productos")
-            return {item.get('sku', '').upper(): item.get('stock', 0) for item in data if item.get('sku')}
+            try:
+                data = response.json()
+                
+                # Validar que data sea una lista
+                if not isinstance(data, list):
+                    st.error(f"❌ Respuesta inesperada de Holded (no es lista): {type(data)}")
+                    return None
+                
+                # Procesar cada item validando estructura
+                stock_dict = {}
+                for item in data:
+                    if isinstance(item, dict) and 'sku' in item:
+                        sku = item.get('sku', '').upper().strip()
+                        stock = item.get('stock', 0)
+                        if sku:  # Solo agregar si el SKU no está vacío
+                            stock_dict[sku] = stock
+                    else:
+                        st.warning(f"⚠️ Item con estructura inesperada en respuesta Holded: {item}")
+                
+                st.success(f"✅ Stock obtenido del almacén: {len(stock_dict)} productos")
+                return stock_dict
+                
+            except json.JSONDecodeError as e:
+                st.error(f"❌ Error decodificando JSON de Holded: {str(e)}")
+                st.code(f"Respuesta recibida: {response.text[:500]}...")
+                return None
+                
         else:
             st.error(f"❌ Error API Holded almacén {warehouse_id[-8:]}: {response.status_code}")
+            if response.text:
+                st.code(f"Detalle del error: {response.text[:300]}...")
             return None
             
     except requests.exceptions.Timeout:
@@ -88,6 +114,7 @@ def obtener_stock_warehouse(warehouse_id: str) -> Optional[Dict]:
         return None
     except Exception as e:
         st.error(f"❌ Error inesperado con Holded API: {str(e)}")
+        st.code(f"Tipo de error: {type(e).__name__}")
         return None
 
 @st.cache_data(ttl=300)
@@ -380,46 +407,116 @@ def mostrar_interface_inventario():
     almacen_info = TECNICOS_CONFIG[tecnico_seleccionado]
     st.info(f"🏢 Almacén: {almacen_info['nombre_almacen']} (ID: {almacen_info['warehouse_id']})")
     
-    # Interface de escaneo
+    # Interface de escaneo optimizada para pistolas
     st.divider()
+    st.subheader("🔍 Escaneo Rápido de Códigos")
     
-    # Input para código de barras
-    col1, col2 = st.columns([3, 1])
+    # Inicializar estados necesarios
+    if 'ultimo_feedback' not in st.session_state:
+        st.session_state.ultimo_feedback = None
+    if 'input_scanner' not in st.session_state:
+        st.session_state.input_scanner = ""
+    
+    # Input optimizado para pistola de código de barras
+    col1, col2 = st.columns([4, 1])
     
     with col1:
-        codigo_escaneado = st.text_input(
-            "🔍 Escanea o introduce el código SKU:",
-            key="input_codigo",
-            placeholder="Ej: 123-ABCDE-5678",
-            help="El cursor debe estar aquí para escanear con pistola"
+        # Campo de entrada con callback automático
+        st.text_input(
+            "📱 Escanea o introduce el código SKU:",
+            key="input_scanner",
+            placeholder="Escanea con pistola o escribe código...",
+            help="💡 Con pistola: escanea y automáticamente se agrega. Manual: escribe y presiona Enter",
+            on_change=procesar_codigo_escaneado_rapido,
+            label_visibility="visible"
         )
+        
+        # Mostrar feedback del último escaneo
+        if st.session_state.ultimo_feedback:
+            feedback = st.session_state.ultimo_feedback
+            if feedback['tipo'] == 'success':
+                st.success(feedback['mensaje'])
+            else:
+                st.warning(feedback['mensaje'])
     
     with col2:
-        if st.button("➕ Agregar", type="primary"):
-            if codigo_escaneado:
-                procesar_codigo_escaneado(codigo_escaneado.strip().upper())
+        st.markdown("### Estadísticas")
+        if st.session_state.inventario_activo:
+            total_items = len(st.session_state.inventario_activo)
+            total_unidades = sum(st.session_state.inventario_activo.values())
+            st.metric("🏷️ SKUs", total_items)
+            st.metric("📦 Unidades", total_unidades)
+        else:
+            st.metric("🏷️ SKUs", 0)
+            st.metric("📦 Unidades", 0)
     
-    # Procesar automáticamente si se presiona Enter
-    if codigo_escaneado and codigo_escaneado.strip():
-        codigo_limpio = codigo_escaneado.strip().upper()
+    # Información de ayuda
+    with st.expander("💡 Instrucciones de Escaneo"):
+        st.markdown("""
+        ### 📱 Escaneo con Pistola:
+        1. **Apunta** la pistola al código de barras
+        2. **Presiona** el gatillo para escanear
+        3. **Automáticamente** se agrega al inventario
+        4. **Listo** para el siguiente escaneo
         
-        # Verificar si es un código nuevo para evitar procesamiento múltiple
-        if 'ultimo_codigo_procesado' not in st.session_state:
-            st.session_state.ultimo_codigo_procesado = ""
+        ### ⌨️ Entrada Manual:
+        1. **Escribe** el código en el campo
+        2. **Presiona Enter** para agregar
+        3. **Se limpia** automáticamente
         
-        if st.session_state.ultimo_codigo_procesado != codigo_limpio:
-            procesar_codigo_escaneado(codigo_limpio)
-            st.session_state.ultimo_codigo_procesado = codigo_limpio
-            # Limpiar el input reemplazando con cadena vacía
-            st.session_state.input_codigo = ""
-            st.rerun()
+        ### 🎯 Consejos:
+        - Mantén el cursor en el campo de entrada
+        - Escanea de forma continua sin parar
+        - Los códigos se validan en tiempo real
+        - El sistema suma automáticamente duplicados
+        """)
+    
+    # Mostrar último escaneo destacado
+    if st.session_state.inventario_activo:
+        ultimo_sku = list(st.session_state.inventario_activo.keys())[-1]
+        ultima_cantidad = st.session_state.inventario_activo[ultimo_sku]
+        st.info(f"🎯 **Último escaneo**: {ultimo_sku} (Total: {ultima_cantidad} uds)")
+    
+    # Script para mantener el foco en el campo (usando componente HTML)
+    st.markdown("""
+    <script>
+    // Mantener el foco en el campo de entrada para escaneo continuo
+    setTimeout(function() {
+        const input = document.querySelector('input[aria-label="📱 Escanea o introduce el código SKU:"]');
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }, 100);
+    </script>
+    """, unsafe_allow_html=True)
+    
+    # Historial de escaneos recientes (opcional)
+    if st.session_state.inventario_activo and st.checkbox("📋 Mostrar últimos escaneos", value=False):
+        st.subheader("⏱️ Últimos 10 Escaneos")
+        items_recientes = list(st.session_state.inventario_activo.items())[-10:]
+        
+        for sku, cantidad in reversed(items_recientes):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.text(sku)
+            with col2:
+                st.text(f"{cantidad} uds")
+            with col3:
+                # Opción para quitar una unidad
+                if st.button("➖", key=f"remove_{sku}", help="Quitar 1 unidad"):
+                    if st.session_state.inventario_activo[sku] > 1:
+                        st.session_state.inventario_activo[sku] -= 1
+                    else:
+                        del st.session_state.inventario_activo[sku]
+                    st.rerun()
     
     # Mostrar inventario actual
     mostrar_inventario_actual()
     
-    # Botones de acción
+    # Botones de acción mejorados
     st.divider()
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         if st.button("💾 Guardar Parcial", use_container_width=True):
@@ -436,42 +533,97 @@ def mostrar_interface_inventario():
                     st.balloons()
                     # Limpiar sesión
                     st.session_state.inventario_activo = {}
+                    st.session_state.ultimo_feedback = None
+                    st.success("🎉 ¡Inventario completado exitosamente!")
             else:
                 st.warning("⚠️ No hay datos para completar")
     
     with col3:
         if st.button("🗑️ Limpiar Todo", use_container_width=True):
-            st.session_state.inventario_activo = {}
-            st.success("🧹 Inventario limpiado")
-            st.rerun()
+            if st.session_state.inventario_activo:
+                if st.button("⚠️ Confirmar Limpieza", key="confirm_clear"):
+                    st.session_state.inventario_activo = {}
+                    st.session_state.ultimo_feedback = None
+                    st.success("🧹 Inventario limpiado")
+                    st.rerun()
+                else:
+                    st.warning("👆 Presiona de nuevo para confirmar")
+            else:
+                st.info("✨ Ya está limpio")
+    
+    with col4:
+        # Botón de pausa/reanudar escaneo
+        if 'escaneo_pausado' not in st.session_state:
+            st.session_state.escaneo_pausado = False
+            
+        if st.session_state.escaneo_pausado:
+            if st.button("▶️ Reanudar Escaneo", type="secondary", use_container_width=True):
+                st.session_state.escaneo_pausado = False
+                st.success("▶️ Escaneo reanudado")
+                st.rerun()
+        else:
+            if st.button("⏸️ Pausar Escaneo", use_container_width=True):
+                st.session_state.escaneo_pausado = True
+                st.warning("⏸️ Escaneo pausado")
+                st.rerun()
 
-def procesar_codigo_escaneado(codigo: str):
-    """Procesa un código escaneado y actualiza el inventario."""
-    if not codigo:
+def procesar_codigo_escaneado_rapido():
+    """Procesa códigos escaneados de forma optimizada para pistolas de código de barras."""
+    # Verificar si el escaneo está pausado
+    if st.session_state.get('escaneo_pausado', False):
+        st.session_state.input_scanner = ""  # Limpiar input
+        return
+    
+    if 'input_scanner' not in st.session_state:
+        return
+    
+    codigo = st.session_state.input_scanner
+    if not codigo or not codigo.strip():
+        return
+    
+    codigo_limpio = codigo.strip().upper()
+    
+    # Validar formato básico del SKU (opcional)
+    if len(codigo_limpio) < 3:
+        st.session_state.ultimo_feedback = {
+            'tipo': 'warning',
+            'mensaje': f"⚠️ Código muy corto: {codigo_limpio}"
+        }
+        st.session_state.input_scanner = ""
         return
     
     # Validar contra dotación
     dotacion_df = st.session_state.dotacion_df
-    sku_existe = codigo in dotacion_df['SKU'].values
+    sku_existe = codigo_limpio in dotacion_df['SKU'].values
     
     # Validar contra Holded maleta
     stock_maleta = st.session_state.stock_holded
-    stock_en_maleta = stock_maleta.get(codigo, 0) if stock_maleta else 0
+    stock_en_maleta = stock_maleta.get(codigo_limpio, 0) if stock_maleta else 0
     
     # Agregar al inventario
-    if codigo in st.session_state.inventario_activo:
-        st.session_state.inventario_activo[codigo] += 1
+    if codigo_limpio in st.session_state.inventario_activo:
+        st.session_state.inventario_activo[codigo_limpio] += 1
     else:
-        st.session_state.inventario_activo[codigo] = 1
+        st.session_state.inventario_activo[codigo_limpio] = 1
     
-    # Mostrar feedback
-    cantidad_actual = st.session_state.inventario_activo[codigo]
+    # Limpiar el input inmediatamente
+    st.session_state.input_scanner = ""
     
+    # Mostrar feedback rápido
+    cantidad_actual = st.session_state.inventario_activo[codigo_limpio]
+    
+    # Almacenar mensaje de feedback en session state para mostrarlo
     if sku_existe:
-        dotacion_esperada = dotacion_df[dotacion_df['SKU'] == codigo]['DOTACIÓN'].iloc[0]
-        st.success(f"✅ {codigo} → Cantidad: {cantidad_actual} | Dotación: {dotacion_esperada} | Holded: {stock_en_maleta}")
+        dotacion_esperada = dotacion_df[dotacion_df['SKU'] == codigo_limpio]['DOTACIÓN'].iloc[0]
+        st.session_state.ultimo_feedback = {
+            'tipo': 'success',
+            'mensaje': f"✅ {codigo_limpio} → Cantidad: {cantidad_actual} | Dotación: {dotacion_esperada} | Holded: {stock_en_maleta}"
+        }
     else:
-        st.warning(f"⚠️ {codigo} → Cantidad: {cantidad_actual} | ❌ No está en dotación | Holded: {stock_en_maleta}")
+        st.session_state.ultimo_feedback = {
+            'tipo': 'warning', 
+            'mensaje': f"⚠️ {codigo_limpio} → Cantidad: {cantidad_actual} | ❌ No está en dotación | Holded: {stock_en_maleta}"
+        }
 
 def mostrar_inventario_actual():
     """Muestra el inventario actual en tiempo real."""
@@ -1201,6 +1353,41 @@ def cargar_inventario_como_conteo(nombre_archivo: str) -> Optional[pd.DataFrame]
 def main():
     st.title("🔧 Analizador de Maletas Técnicas - Sistema Completo")
     st.markdown("### Sistema avanzado de inventario, control y análisis integrado con Holded")
+    
+    # CSS personalizado para mejor UX en escaneo
+    st.markdown("""
+    <style>
+    /* Estilo para el campo de escaneo */
+    .stTextInput > div > div > input {
+        font-size: 18px;
+        font-weight: bold;
+        background-color: #f0f8ff;
+        border: 2px solid #4CAF50;
+    }
+    
+    /* Highlight para feedback de escaneo */
+    .scan-success {
+        background-color: #d4edda;
+        border-left: 5px solid #28a745;
+        padding: 10px;
+        margin: 5px 0;
+    }
+    
+    .scan-warning {
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        padding: 10px;
+        margin: 5px 0;
+    }
+    
+    /* Botones más grandes para mobile */
+    .stButton > button {
+        font-size: 16px;
+        font-weight: bold;
+        height: 3em;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     # Menú lateral
     menu = st.sidebar.radio(
